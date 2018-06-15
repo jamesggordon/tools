@@ -1,0 +1,206 @@
+#!/usr/bin/env php
+<?php
+/**
+ * The purpose of this script is to analyse all of the files in a directory, from oldest to newest, and provide a list
+ * of files that will use up as much space as possible on a dual layer DVD.
+ *
+ * Note: It does not attempt to fill gaps by cherry picking from other files in the folder. It literally just goes
+ *       through the list until it reaches the limit, as this is how I like to archive my database dumps. :-)
+ */
+
+/*
+ * Data Points:
+ *
+ * 8.49GB fits onto a DVD-DL. That's 8,489,704,023 bytes according to Finder and this script.
+ */
+$listOnly = false;
+$justCount = false;
+$sourceDir = '.';
+$destSet = 0;
+$destDir = '~/tmp';
+$reverse = false;
+
+$mediaTypes = array( 'cd' => 700000000, 'dvd' => 4400000000, 'dvddl' => 8500000000 );
+$mediaType = 'dvddl';
+
+if ( $argc > 1 )
+{
+    for( $c = 1; $c < $argc; $c++ )
+    {
+        if ( $argv[$c][0] == '-' )
+        {
+            switch( $argv[$c] )
+            {
+                case '-l':
+                {
+                    $listOnly = true;
+                    break;
+                }
+
+                case '-c':
+                {
+                    $justCount = true;
+                    break;
+                }
+
+                case '-r':
+                {
+                    $reverse = true;
+                    break;
+                }
+
+                case '-s':
+                {
+                    if ( $c + 1 >= $argc )
+                    {
+                        echo "Must provide source directory when using the -s directive.\n";
+                        exit;
+                    }
+
+                    $sourceDir = $argv[++$c];
+                    break;
+                }
+
+                case '-d':
+                {
+                    if ( $c + 1 >= $argc )
+                    {
+                        echo "Must provide destination directory when using the -d directive.\n";
+                        exit;
+                    }
+
+                    $destDir = $argv[++$c];
+                    $destSet++;
+                    break;
+                }
+
+                case '-m':
+                {
+                    if ( $c + 1 >= $argc )
+                    {
+                        echo "Must provide media type when using the -m directive.\n";
+                        exit;
+                    }
+
+                    if ( isset( $mediaTypes[ $argv[$c + 1]] ))
+                    {
+                        $mediaType = $argv[++$c];
+                    }
+                    else
+                    {
+                        echo "Unsupported media type: {$argv[$c + 1]}. Valid types are: ", implode( ',', array_keys( $mediaTypes )), "\n";
+                        exit;
+                    }
+
+                    break;
+                }
+
+                default:
+                {
+                    echo "Unsupported directive: {$argv[$c]}\n";
+                    exit;
+                }
+            }
+        }
+        else
+        {
+            $destDir = $argv[$c];
+            $destSet++;
+        }
+    }
+}
+
+if ( $destSet > 1 )
+{
+    echo "Error: destination folder set twice - can't do that!\n";
+    exit;
+}
+
+$target = $mediaTypes[$mediaType];
+$file_list = array();
+
+// Open a known directory, and proceed to read its contents
+if (is_dir($sourceDir))
+{
+    $dh = opendir($sourceDir);
+
+    if ( $dh === false )
+    {
+        echo 'Sorry, could not open directory: ' . $sourceDir . '<br>';
+        exit;
+    }
+    else
+    {
+        while (($fileName = readdir($dh)) !== false)
+        {
+            if ( $fileName == '.DS_Store' || strpos( $fileName, '._' ) === 0 )
+            {
+                echo "Skipping {$fileName}\n";
+                continue;
+            }
+
+            $fullName = $sourceDir . '/' . $fileName;
+
+            if ( filetype( $fullName ) == 'file' )
+            {
+                $details = stat( $fullName );
+                $file_list[$details['mtime'] . $fileName ] = array( $fileName, $details['size'] );
+            }
+        }
+
+        closedir($dh);
+    }
+
+
+    if ( $reverse )
+    {
+        krsort( $file_list );
+    }
+    else
+    {
+        ksort( $file_list );
+    }
+
+    $size = 0;
+
+    foreach( $file_list as $file )
+    {
+        $size += $file[1];
+
+        if ( $size >= $target && !$justCount )
+        {
+            $size -= $file[1]; // Just so we can report on it later
+            break;
+        }
+
+        if ( $listOnly )
+        {
+            echo $file[0], "\n";
+        }
+        else
+        {
+            if ( rename( "$sourceDir/$file[0]", "$destDir/$file[0]") !== true )
+            {
+                echo "Move of $sourceDir/$file[0] to $destDir/$file[0] failed!\n";
+                exit;
+            }
+        }
+    }
+}
+else
+{
+    echo "Error: $sourceDir is not a directory.\n";
+    exit;
+}
+
+$byte = number_format( $size );
+$giga = number_format( $size / 1000 / 1000 / 1000, 2 );
+$mega = number_format( $size / 1000 / 1000 );
+$mebi = number_format( $size / 1024 / 1024 );
+$perc = number_format(( $size / $target ) * 100, 2 );
+
+echo "Total Bytes: $byte\n";
+echo "Gigabytes: $giga\n";
+echo "Megabytes: $mega\n";
+echo "Mebibytes: $mebi\n";
+echo "Proportion of media used: $perc%\n";
